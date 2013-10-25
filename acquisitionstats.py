@@ -30,7 +30,8 @@ class statistics:
         self.totalBirthAllowance = 0
         self.totalChildMissingRelations = 0
         self.totalLegalGround4= 0
-        self.totalMissingForms= 0
+        self.totalHavingForms= 0
+        self.havingFormsData=[]
         self.totalReceiver = 0
         self.totalDeceasedFileOwner  = 0
         self.totalVarious = 0
@@ -51,7 +52,7 @@ class statistics:
         print "Files having birth allowance {0}".format(self.totalBirthAllowance)
         print "Files having unemployed child legal ground 4 {0}".format(self.totalLegalGround4)
         print "Files having child(ren) with missing relations {0}".format(self.totalChildMissingRelations)
-        print "Files having child(ren) with missing forms {0}".format(self.totalMissingForms)
+        print "Files having child(ren) with missing forms {0}".format(self.totalHavingForms)
         print "Files having child(ren) with receiver {0}".format(self.totalReceiver)
         print "Files having deceased fileowner {0}".format(self.totalDeceasedFileOwner)
 
@@ -75,7 +76,7 @@ class statistics:
                 <tr><td>Files having birth allowance </td><td>{6}</td></tr>
                 <tr><td>Files having unemployed child legal ground 4 </td><td>{7}</td></tr>
                 <tr><td>Files having child(ren) with missing relations</td><td>{8}</td></tr>
-                <tr><td>Files having child(ren) with missing forms </td><td>{9}</td></tr>
+                <tr><td>Files having child(ren) with forms </td><td>{9}</td></tr>
                 <tr><td>Files having child(ren) with receiver </td><td>{10}</td></tr>
                 <tr><td>Files having deceased fileowner </td><td>{11}</td></tr>
                 <tr><td>Files having various tag </td><td>{12}</td></tr>
@@ -92,7 +93,7 @@ class statistics:
                                 self.totalBirthAllowance,
                                 self.totalLegalGround4,
                                 self.totalChildMissingRelations,
-                                self.totalMissingForms,
+                                self.totalHavingForms,
                                 self.totalReceiver,
                                 self.totalDeceasedFileOwner, 
                                 self.totalVarious, 
@@ -134,7 +135,7 @@ class statistics:
         self.findChildMissingRelations()
         self.findFinancialAdjustment()
         self.findChildLegalGround4()
-        self.findChildMissingForm()
+        self.findFilesHavingForms()
         self.findChildWithReceiver()
         self.findDeceasedFileOwner()
         self.findVarious()
@@ -249,15 +250,16 @@ class statistics:
             if  count > 0  : 
                self.totalLegalGround4 +=1
     
-    def findChildMissingForm(self):
+    def findFilesHavingForms(self):
         #print 'finding child missing forms'
-        for file in self.files:
-            current_file = os.path.join(self.inputdir, file)
+        for dir, file_name in self.files.files():
+            current_file = os.path.join(os.path.join(self.inputdir, dir), file_name)
             doc = lxml.etree.parse(current_file)
-            nrOfChildren = doc.xpath('count(//Child)')
             count = doc.xpath('count(//Child/Forms)')
-            if  count != nrOfChildren :
-                self.totalMissingForms +=1
+            fileownerINSS = doc.xpath('/FileDescription/FileOwner/PersonINSS/text()')
+            if  count > 0 or self.hasAcquiPlusChanges(file_name, "*_Forms.xml", ["count(//childForms)"],dir):
+                self.totalHavingForms +=1
+                self.havingFormsData.append((fileownerINSS, current_file))
     
     def findChildWithReceiver(self):
         #print 'finding child with receiver'
@@ -324,12 +326,12 @@ class statistics:
             current_file = os.path.join(self.inputdir, file)
             doc = lxml.etree.parse(current_file)
             payedRang = doc.xpath('//ChildList/Child/Rang/PayedRangChild/text()')
+            fileownerINSS = doc.xpath('/FileDescription/FileOwner/PersonINSS/text()')
             if  payedRang :
                 if  not '1' in payedRang :
-                    self.missingFicticiousChildData.append(current_file)
+                    self.missingFicticiousChildData.append((fileownerINSS, current_file))
                 elif  self.checkSequence(payedRang) == 0:
-                    self.missingFicticiousChildData.append("{0} not insequence".format(current_file))
-                
+                    self.missingFicticiousChildData.append((fileownerINSS, current_file))
     
     def pairwise(self, iterable):
         "s -> (s0,s1), (s1,s2), (s2, s3), ..."
@@ -370,6 +372,8 @@ class statistics:
         ws3 = wb.add_sheet("Files Child In Assimilation")
         ws4 =  wb.add_sheet("Files Child In Placement")
         ws5 = wb.add_sheet("Financial adjustment")
+        ws6 = wb.add_sheet("Files with Forms")
+        ws7 = wb.add_sheet("Files missing fictitious")
         rowCounter=0
         for item in self.variousData.items() :
             ws.write_merge(rowCounter, rowCounter, 0, 2, item[0], style)
@@ -433,6 +437,33 @@ class statistics:
                 colCounter += 1
             rowCounter += 1
         
+        ws6.write(0, 0, "INSS FILEOWNER")
+        ws6.write(0, 1, "FILE")
+        ws6.col(0).width = 256 * len("INSS FILEOWNER")
+        if len(self.havingFormsData) > 0:
+            ws6.col(1).width = 256 * max([len(row[1]) for row in self.havingFormsData])
+        rowCounter=1
+        for item in self.havingFormsData:
+            colCounter =0
+            for colVal in item :
+                ws6.write(rowCounter,colCounter, colVal )
+                colCounter += 1
+            rowCounter += 1
+            
+        ws7.write(0, 0, "INSS FILEOWNER")
+        ws7.write(0, 1, "FILE")
+        ws7.col(0).width = 256 * len("INSS FILEOWNER")
+        if len(self.missingFicticiousChildData) > 0:
+            ws7.col(1).width = 256 * max([len(row[1]) for row in self.missingFicticiousChildData])
+        rowCounter=1
+        for item in self.missingFicticiousChildData:
+            colCounter =0
+            for colVal in item :
+                ws7.write(rowCounter,colCounter, colVal )
+                colCounter += 1
+            rowCounter += 1
+        
+        
         wb.save("myworkbook.xls")
     
 def main(argv):
@@ -471,7 +502,7 @@ def main(argv):
         stats.analyze()
         stats. writeExcelFile()
         htmlparts.append(stats.createPdfreport())
-        htmlparts.append(stats.createVariousDataList())
+        #htmlparts.append(stats.createVariousDataList())
         htmlparts.append(stats.createMissingFicticiousChildList())
     else:
         for root, dirs, files in os.walk(inputdir, topdown=True):
