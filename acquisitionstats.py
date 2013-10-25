@@ -8,39 +8,25 @@ import re
 import formic
 import fnmatch
 import logging
+from xlwt import *
 
 
 class MyFPDF(FPDF, HTMLMixin):
     pass
 
-class various:
-    def __init__(self, inputdir, files):
-        self.files = files
-        self.inputdir = inputdir
-
-    def gatherData(self):
-        for file in files : 
-            self.getWorkerStatusSituation(file)
-    
-    def getWorkerStatusSituation(self, file):
-        current_file = os.path.join(self.inputdir, file)
-        doc = lxml.etree.parse(current_file)
-        various = doc.xpath('//WorkerStatusSituation/Various)')
-        print various
-
 class statistics:
     def __init__(self,inputdir, files):
         logging.debug('constructing statistics object')
-        for file in files :
-            logging.debug(file)
-        
         self.inputdir = inputdir
         self.files = files
         self.totalNumberOfFiles = 0
         self.totalMultipleBeneficiaries = 0
         self.totalFinancialAdjustment = 0
+        self.financialAdjustmentData = []
         self.totalNumberPlacedChildren = 0
+        self.placedChildrenData = []
         self.totalYoungJobSeeker = 0
+        self.youngJobSeekerData = []
         self.totalBirthAllowance = 0
         self.totalChildMissingRelations = 0
         self.totalLegalGround4= 0
@@ -50,10 +36,10 @@ class statistics:
         self.totalVarious = 0
         self.totalAgeAllowance = 0
         self.totalInAssimilation = 0
+        self.inAssimilationData=[]
         self.variousData={}
         self.missingFicticiousChildData = []
-        self.prefix = "output"
-        self.postfix = ".xml-changes"
+        self.postfix = "-changes"
 
     def printHtml(self):
         print "HTML"
@@ -74,8 +60,6 @@ class statistics:
             self.variousData.get(str_to_add).append((personINSS, fileName, parent))
         else:
             self.variousData[str_to_add] = [(personINSS, fileName, parent)]
-        
-       
 
     def createPdfreport(self):
         html = """
@@ -130,7 +114,10 @@ class statistics:
                  html += u"""<tr><td>INSS :{0}</td></tr>""".format(element[0])
             html += u"</table>"
         return html
-        
+
+    def createVariousDataListExcel(self):
+        print("not implemented")
+
     def createMissingFicticiousChildList(self):
         html = u"<p>Files missing ficticious child(ren)</p><ol>"
         for var in self.missingFicticiousChildData:
@@ -156,10 +143,11 @@ class statistics:
         self.findMissingFicticiousChildren()
     
     
-    def hasAcquiPlusChanges(self, inssFileOwner, filefilter, xpathToCheck):
-        changeDir = self.prefix + inssFileOwner + self.postfix
-        change_dir_location = os.path.join(self.inputdir, changeDir)
+    def hasAcquiPlusChanges(self, filenameForDir, filefilter, xpathToCheck, dirToCheck):
+        changeDir = filenameForDir + self.postfix
+        change_dir_location = os.path.join(os.path.join(self.inputdir, dirToCheck), changeDir)
         if os.path.exists(change_dir_location):
+            logging.debug('checking %s for acquiplus changes', change_dir_location)
             fileset= formic.FileSet(include=filefilter, directory=change_dir_location)
             for filename in fileset.qualified_files(absolute=True):
                 doc = lxml.etree.parse(filename)
@@ -170,11 +158,12 @@ class statistics:
                         return 1
                 return 0
     
-    def hasAcquiPlusAddedForms(self, inssFileOwner, filefilter):
+    def checkFormsAddedByAcquiPlus(self, inssFileOwner, filefilter, formCount, childCount):
          changeDir = self.prefix + inssFileOwner + self.postfix
          change_dir_location = os.path.join(self.inputdir, changeDir)
          if os.path.exists(change_dir_location):
             fileset= formic.FileSet(include=filefilter, directory=change_dir_location)
+            
     
     def countFiles(self):
         self.totalNumberOfFiles = len(self.files)
@@ -198,14 +187,16 @@ class statistics:
     
     def findFinancialAdjustment(self):
         #print 'finding financial adjustment':
-        for file in self.files:
-            current_file = os.path.join(self.inputdir, file)
+        for dir,  file_name in self.files.files():
+            current_file = os.path.join(os.path.join(self.inputdir, dir), file_name)
             doc = lxml.etree.parse(current_file)
             fileownerINSS = doc.xpath('/FileDescription/FileOwner/PersonINSS/text()')
             if  (doc.xpath('count(//Beneficiary/NaturalPerson/FinancialAdjustment)') > 0 or doc.xpath('count(//Beneficiary/Organization/FinancialAdjustment)') > 0): 
                 self.totalFinancialAdjustment += 1
-            elif self.hasAcquiPlusChanges(fileownerINSS[0], "*_BeneficiariesFinancialAdjustments.xml",["count(//financialAdjustments)"]):
+                self.financialAdjustmentData .append((fileownerINSS[0], current_file))
+            elif self.hasAcquiPlusChanges(file_name, "*_BeneficiariesFinancialAdjustments.xml",["count(//financialAdjustments)"], dir):
                 self.totalFinancialAdjustment += 1
+                self.financialAdjustmentData .append((fileownerINSS[0], current_file))
     
     def findPlacedChilderen(self):
         #print 'finding placed children'
@@ -213,20 +204,21 @@ class statistics:
             current_file = os.path.join(self.inputdir, file)
             doc = lxml.etree.parse(current_file)
             count = doc.xpath('count(//PlacedInOrganization)')
+            fileownerINSS = doc.xpath('/FileDescription/FileOwner/PersonINSS/text()')
             if  count > 0: 
                self.totalNumberPlacedChildren +=1
+               placedChildrenData.append(fileownerINSS[0], current_file)
 
     def findYoungJobSeeker(self):
         #print 'finding YoungJobSeeker'
-        for file in self.files:
-            current_file = os.path.join(self.inputdir, file)
+        for dir,  file_name in self.files.files():
+            current_file = os.path.join(os.path.join(self.inputdir, dir), file_name)
             doc = lxml.etree.parse(current_file)
             fileownerINSS = doc.xpath('/FileDescription/FileOwner/PersonINSS/text()')
             count = doc.xpath('count(//YoungJobSeekerInscriptiondate)')
-            if  count >=1: 
+            if  count >=1 or self.hasAcquiPlusChanges(file_name, "*_YoungJobSeekers.xml", ["count(//inscriptionDate)"],dir):
                self.totalYoungJobSeeker +=1
-            elif self.hasAcquiPlusChanges(fileownerINSS[0], "*_YoungJobSeekers.xml", ["count(//inscriptionDate)"]):
-               self.totalYoungJobSeeker +=1
+               self.youngJobSeekerData.append((fileownerINSS[0], current_file))
                
     def findBirthAllowance(self):
         #print 'finding birthallowance'
@@ -264,8 +256,7 @@ class statistics:
             doc = lxml.etree.parse(current_file)
             nrOfChildren = doc.xpath('count(//Child)')
             count = doc.xpath('count(//Child/Forms)')
-            if  count != nrOfChildren  :
-                print ("children({0}) / forms({1} => diff({2})".format(nrOfChildren, count,  (nrOfChildren-count)))
+            if  count != nrOfChildren :
                 self.totalMissingForms +=1
     
     def findChildWithReceiver(self):
@@ -322,9 +313,11 @@ class statistics:
         for file in self.files:
             current_file = os.path.join(self.inputdir, file)
             doc = lxml.etree.parse(current_file)
+            fileownerINSS = doc.xpath('/FileDescription/FileOwner/PersonINSS/text()')
             count = doc.xpath('count(//Child/ChildInAssimilation)')
             if  count > 0  : 
                self.totalInAssimilation +=1
+               self.inAssimilationData.append((fileownerINSS[0], current_file))
     
     def findMissingFicticiousChildren(self):
          for file in self.files:
@@ -351,18 +344,107 @@ class statistics:
                 return 0
         return 1
         
+    def writeExcelFile(self):
+        fnt = Font()
+        fnt.name = 'Arial'
+        fnt.colour_index = 4
+        fnt.bold = True
         
+        borders = Borders()
+        borders.left = 6
+        borders.right = 6
+        borders.top = 6
+        borders.bottom = 6
+        
+        al = Alignment()
+        al.horz = Alignment.HORZ_CENTER
+        al.vert = Alignment.VERT_CENTER
+        
+        style = XFStyle()
+        style.font = fnt
+        style.borders = borders
+        style.alignment = al
+        wb = Workbook()
+        ws = wb.add_sheet("Various Data")
+        ws2 = wb.add_sheet("Files Youngjobseeker")
+        ws3 = wb.add_sheet("Files Child In Assimilation")
+        ws4 =  wb.add_sheet("Files Child In Placement")
+        ws5 = wb.add_sheet("Financial adjustment")
+        rowCounter=0
+        for item in self.variousData.items() :
+            ws.write_merge(rowCounter, rowCounter, 0, 2, item[0], style)
+            rowCounter +=1
+            for element in item[1]:
+                colCounter=0
+                for colVal in element:
+                    ws.write(rowCounter, colCounter, colVal)
+                    colCounter += 1
+                rowCounter += 1
+        ws.col(0).width = 256 * 5
+    
+        ws2.write(0, 0, "INSS FILEOWNER")
+        ws2.write(0, 1, "FILE")
+        ws2.col(0).width = 256 * len("INSS FILEOWNER")
+        ws2.col(1).width = 256 * max([len(row[1]) for row in self.youngJobSeekerData])
+        rowCounter=1
+        for item in self.youngJobSeekerData:
+            colCounter =0
+            for colVal in item :
+                ws2.write(rowCounter,colCounter, colVal )
+                colCounter += 1
+            rowCounter += 1 
+        """write excal tab children in assimilation"""
+        
+        ws3.write(0, 0, "INSS FILEOWNER")
+        ws3.write(0, 1, "FILE")
+        ws3.col(0).width = 256 * len("INSS FILEOWNER")
+        ws3.col(1).width = 256 * max([len(row[1]) for row in self.inAssimilationData])
+        rowCounter=1
+        for item in self.inAssimilationData:
+            colCounter =0
+            for colVal in item :
+                ws3.write(rowCounter,colCounter, colVal )
+                colCounter += 1
+            rowCounter += 1
+        
+        ws4.write(0, 0, "INSS FILEOWNER")
+        ws4.write(0, 1, "FILE")
+        ws4.col(0).width = 256 * len("INSS FILEOWNER")
+        if len(self.placedChildrenData) > 0:
+            ws4.col(1).width = 256 * max([len(row[1]) for row in self.placedChildrenData])
+        rowCounter=1
+        for item in self.placedChildrenData:
+            colCounter =0
+            for colVal in item :
+                ws4.write(rowCounter,colCounter, colVal )
+                colCounter += 1
+            rowCounter += 1
+        
+        ws5.write(0, 0, "INSS FILEOWNER")
+        ws5.write(0, 1, "FILE")
+        ws5.col(0).width = 256 * len("INSS FILEOWNER")
+        if len(self.financialAdjustmentData) > 0:
+            ws5.col(1).width = 256 * max([len(row[1]) for row in self.financialAdjustmentData])
+        rowCounter=1
+        for item in self.financialAdjustmentData:
+            colCounter =0
+            for colVal in item :
+                ws5.write(rowCounter,colCounter, colVal )
+                colCounter += 1
+            rowCounter += 1
+        
+        wb.save("myworkbook.xls")
     
 def main(argv):
     
     recursive = 0
+   
     logging.basicConfig(filename='stats.log',level=logging.DEBUG)
     logging.info('Starting stats script')
-   
 
-    
     try:
-      opts, args = getopt.getopt(argv,"hRi:o:",["idir=","odir="])
+      opts, args = getopt.getopt(argv,"VhRi:o:",["idir=","odir="])
+      
     except getopt.GetoptError:
             print 'test.py -i <inputdir>'
             sys.exit(2)
@@ -376,14 +458,18 @@ def main(argv):
             outputdir = arg
         elif opt in ("-R"):
             recursive=1
-    print 'Input file is "', inputdir
-    
+        elif opt in ("-V"):
+            verbose=1
+            
+    logging.debug('Input file is %s', inputdir)
+   
     htmlparts = []
     
     if recursive == 1:
         "use recursive to get all reporting"
-        stats = statistics(inputdir, formic.FileSet(include="*.xml",exclude=["*.xml-changes", "*_*_*.xml"], directory=inputdir))
+        stats = statistics(inputdir, formic.FileSet(include="*.xml",exclude=["*.xml-changes","*_*_*_*.xml" ], directory=inputdir))
         stats.analyze()
+        stats. writeExcelFile()
         htmlparts.append(stats.createPdfreport())
         htmlparts.append(stats.createVariousDataList())
         htmlparts.append(stats.createMissingFicticiousChildList())
