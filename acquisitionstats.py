@@ -17,6 +17,7 @@ class MyFPDF(FPDF, HTMLMixin):
 class statistics:
     def __init__(self,inputdir, files):
         logging.debug('constructing statistics object')
+        self.logger = logging.getLogger('Statistics')
         self.inputdir = inputdir
         self.files = files
         self.totalNumberOfFiles = 0
@@ -41,21 +42,7 @@ class statistics:
         self.variousData={}
         self.missingFicticiousChildData = []
         self.postfix = "-changes"
-
-    def printHtml(self):
-        print "HTML"
-        print "Files recieved {0}".format(self.totalNumberOfFiles)
-        print "Files having multiple beneficiaries {0}".format(self.totalMultipleBeneficiaries)
-        print "Files having FinancialAdjustment(Debt / Withholding) {0}".format(self.totalFinancialAdjustment)
-        print "Files having placed children {0}".format(self.totalNumberPlacedChildren)
-        print "Files having young jobseeker {0}".format(self.totalYoungJobSeeker)
-        print "Files having birth allowance {0}".format(self.totalBirthAllowance)
-        print "Files having unemployed child legal ground 4 {0}".format(self.totalLegalGround4)
-        print "Files having child(ren) with missing relations {0}".format(self.totalChildMissingRelations)
-        print "Files having child(ren) with missing forms {0}".format(self.totalHavingForms)
-        print "Files having child(ren) with receiver {0}".format(self.totalReceiver)
-        print "Files having deceased fileowner {0}".format(self.totalDeceasedFileOwner)
-
+        
     def addToList(self, str_to_add, parent, fileName, personINSS):
         if str_to_add in self.variousData:
             self.variousData.get(str_to_add).append((personINSS, fileName, parent))
@@ -148,16 +135,16 @@ class statistics:
         changeDir = filenameForDir + self.postfix
         change_dir_location = os.path.join(os.path.join(self.inputdir, dirToCheck), changeDir)
         if os.path.exists(change_dir_location):
-            logging.debug('checking %s for acquiplus changes', change_dir_location)
+            self.logger.debug('change directory found')
             fileset= formic.FileSet(include=filefilter, directory=change_dir_location)
             for filename in fileset.qualified_files(absolute=True):
                 doc = lxml.etree.parse(filename)
                 for xpathExpression in xpathToCheck:
                     count = doc.xpath(xpathExpression)
-                    print count
                     if count > 0 :
                         return 1
                 return 0
+            return 0
     
     def checkFormsAddedByAcquiPlus(self, inssFileOwner, filefilter, formCount, childCount):
          changeDir = self.prefix + inssFileOwner + self.postfix
@@ -187,7 +174,6 @@ class statistics:
         print file_most_bene
     
     def findFinancialAdjustment(self):
-        #print 'finding financial adjustment':
         for dir,  file_name in self.files.files():
             current_file = os.path.join(os.path.join(self.inputdir, dir), file_name)
             doc = lxml.etree.parse(current_file)
@@ -200,7 +186,6 @@ class statistics:
                 self.financialAdjustmentData .append((fileownerINSS[0], current_file))
     
     def findPlacedChilderen(self):
-        #print 'finding placed children'
         for file in  self.files:
             current_file = os.path.join(self.inputdir, file)
             doc = lxml.etree.parse(current_file)
@@ -211,7 +196,6 @@ class statistics:
                placedChildrenData.append(fileownerINSS[0], current_file)
 
     def findYoungJobSeeker(self):
-        #print 'finding YoungJobSeeker'
         for dir,  file_name in self.files.files():
             current_file = os.path.join(os.path.join(self.inputdir, dir), file_name)
             doc = lxml.etree.parse(current_file)
@@ -222,7 +206,7 @@ class statistics:
                self.youngJobSeekerData.append((fileownerINSS[0], current_file))
                
     def findBirthAllowance(self):
-        #print 'finding birthallowance'
+        
         for file in self.files:
             current_file = os.path.join(self.inputdir, file)
             doc = lxml.etree.parse(current_file)
@@ -232,15 +216,33 @@ class statistics:
     
     def findChildMissingRelations(self):
         #print 'finding child missing relations'
-        for file in self.files:
-            current_file = os.path.join(self.inputdir, file)
+        for dir,  file_name in self.files.files():
+            current_file = os.path.join(os.path.join(self.inputdir, dir), file_name)
             doc = lxml.etree.parse(current_file)
             countBene = doc.xpath('count(//BeneficiaryList/Beneficiary)')
             countChild =  doc.xpath('count(//Child)')
             count = doc.xpath('count(//BondBeneficiary/RelationBeneficiarytoChild)')
-            if  count != (countBene * countChild): 
-               self.totalChildMissingRelations +=1
-
+            if  count != (countBene * countChild):
+                """check acquipplus files"""
+                logging.debug('Processing file %s for missing relations', current_file)
+                childlist = doc.xpath('//ChildList/Child/PersonINSS/text()') 
+                actorsToCheckList = doc.xpath('//BeneficiaryList/Beneficiary/NaturalPerson/PersonINSS/text()')
+                keepProcessing = True
+                for childid in childlist :
+                    if keepProcessing == False :
+                        break
+                    self.logger.debug('Processing child inss %s', 'childid')
+                    query = "//Child[PersonINSS='{0}']/BondBeneficiaryList/BondBeneficiary/PersonINSS/text()".format(childid)
+                    benes = doc.xpath(query)
+                    toCheck = [x for x in actorsToCheckList if x not in benes]
+                    for id in toCheck :
+                        queryAcPlus = "count(//actorRelationsAndMotifs[actorINSS='{0}'])".format(id)
+                        if self.hasAcquiPlusChanges(file_name, "*_ChildrenActorsRelation.xml", [queryAcPlus], dir) ==0 :
+                             self.logger.debug('missing relation not found in Acquiplus files')
+                             self.totalChildMissingRelations +=1
+                             keepProcessing = False
+                             break
+    
     def findChildLegalGround4(self):
         #print 'finding child legal ground 4'
         for file in self.files:
@@ -389,7 +391,8 @@ class statistics:
         ws2.write(0, 0, "INSS FILEOWNER")
         ws2.write(0, 1, "FILE")
         ws2.col(0).width = 256 * len("INSS FILEOWNER")
-        ws2.col(1).width = 256 * max([len(row[1]) for row in self.youngJobSeekerData])
+        if len(self.youngJobSeekerData) > 0:
+            ws2.col(1).width = 256 * max([len(row[1]) for row in self.youngJobSeekerData])
         rowCounter=1
         for item in self.youngJobSeekerData:
             colCounter =0
@@ -402,7 +405,8 @@ class statistics:
         ws3.write(0, 0, "INSS FILEOWNER")
         ws3.write(0, 1, "FILE")
         ws3.col(0).width = 256 * len("INSS FILEOWNER")
-        ws3.col(1).width = 256 * max([len(row[1]) for row in self.inAssimilationData])
+        if len(self.inAssimilationData) > 0:
+            ws3.col(1).width = 256 * max([len(row[1]) for row in self.inAssimilationData])
         rowCounter=1
         for item in self.inAssimilationData:
             colCounter =0
